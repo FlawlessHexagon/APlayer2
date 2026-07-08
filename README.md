@@ -11,4 +11,3 @@ All project planning, architecture decisions, and agent protocols are located in
 
 - `_doc/doc_general.md` - Core project plan and technical direction.
 - `_doc/dev_phase/` - Detailed phase-by-phase implementation plans.
-- `agent_protocol.md` - Strict operating rules for AI agents.
