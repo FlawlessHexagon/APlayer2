@@ -14,6 +14,8 @@ import 'screens/now_playing_screen.dart';
 import 'screens/dsp_control_screen.dart';
 import 'screens/db_test_screen.dart';
 import 'screens/scanner_test_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/playlist_detail_screen.dart';
 
 late APlayerAudioHandler audioHandler;
 
@@ -70,6 +72,13 @@ final _router = GoRouter(
       path: '/scanner_test',
       builder: (context, state) => const ScannerTestScreen(),
     ),
+    GoRoute(
+      path: '/playlist/:id',
+      builder: (context, state) {
+        final id = state.pathParameters['id']!;
+        return PlaylistDetailScreen(playlistId: id);
+      },
+    ),
   ],
 );
 
@@ -86,43 +95,5 @@ class APlayerApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Library (Home)'),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'Home Screen / Library Dummy',
-              style: TextStyle(fontSize: 18),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => context.push('/now_playing'),
-              child: const Text('Go to Now Playing'),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => context.push('/db_test'),
-              child: const Text('DB Validation'),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => context.push('/scanner_test'),
-              child: const Text('Scanner Validation'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
+// HomeScreen has been moved to lib/screens/home_screen.dart
 // NowPlayingScreen has been moved to lib/screens/now_playing_screen.dart

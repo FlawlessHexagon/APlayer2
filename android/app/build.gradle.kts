@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.aplayer.aplayer2"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
