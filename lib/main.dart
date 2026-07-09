@@ -9,6 +9,7 @@ import 'theme/app_theme.dart';
 import 'providers/audio_provider.dart';
 import 'providers/audio_handler.dart';
 import 'screens/now_playing_screen.dart';
+import 'screens/dsp_control_screen.dart';
 
 late APlayerAudioHandler audioHandler;
 
@@ -45,6 +46,10 @@ final _router = GoRouter(
     GoRoute(
       path: '/now_playing',
       builder: (context, state) => const NowPlayingScreen(),
+    ),
+    GoRoute(
+      path: '/dsp',
+      builder: (context, state) => const DspControlScreen(),
     ),
   ],
 );

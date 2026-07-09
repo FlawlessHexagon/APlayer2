@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../providers/audio_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -72,6 +73,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
              icon: const Icon(Icons.music_note),
              onPressed: _loadTestTrack,
              tooltip: 'Load Test Track',
+           ),
+           IconButton(
+             icon: const Icon(Icons.graphic_eq),
+             onPressed: () => GoRouter.of(context).push('/dsp'),
+             tooltip: 'DSP Engine',
            )
         ],
       ),
