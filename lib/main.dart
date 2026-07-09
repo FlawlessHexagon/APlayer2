@@ -13,6 +13,7 @@ import 'repositories/database_repository.dart';
 import 'screens/now_playing_screen.dart';
 import 'screens/dsp_control_screen.dart';
 import 'screens/db_test_screen.dart';
+import 'screens/scanner_test_screen.dart';
 
 late APlayerAudioHandler audioHandler;
 
@@ -65,6 +66,10 @@ final _router = GoRouter(
       path: '/db_test',
       builder: (context, state) => const DbTestScreen(),
     ),
+    GoRoute(
+      path: '/scanner_test',
+      builder: (context, state) => const ScannerTestScreen(),
+    ),
   ],
 );
 
@@ -107,6 +112,11 @@ class HomeScreen extends StatelessWidget {
             ElevatedButton(
               onPressed: () => context.push('/db_test'),
               child: const Text('DB Validation'),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () => context.push('/scanner_test'),
+              child: const Text('Scanner Validation'),
             ),
           ],
         ),
