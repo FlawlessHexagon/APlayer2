@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/audio_provider.dart';
+import '../providers/queue_provider.dart';
 import '../theme/app_theme.dart';
 
 class NowPlayingScreen extends ConsumerStatefulWidget {
@@ -170,17 +171,26 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
   }
 
   Widget _buildTrackInfo() {
+    final queueState = ref.watch(queueStateProvider);
+    final track = queueState.currentTrack;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
-      children: const [
+      children: [
         Text(
-          'Validation Track',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.offWhite),
+          track?.title ?? 'No Track Loaded',
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.offWhite),
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-        SizedBox(height: 8),
+        const SizedBox(height: 8),
         Text(
-          'APlayer Engine',
-          style: TextStyle(fontSize: 16, color: AppColors.midGrey),
+          track?.artist ?? 'Unknown Artist',
+          style: const TextStyle(fontSize: 16, color: AppColors.midGrey),
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
@@ -230,52 +240,79 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
 
   Widget _buildPlaybackControls(AppPlaybackState state) {
     final isLoading = state.status == PlaybackStatus.loading;
+    final queueNotifier = ref.read(queueStateProvider.notifier);
+    final queueState = ref.watch(queueStateProvider);
     
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    IconData repeatIcon;
+    switch (queueState.mode) {
+      case PlaybackMode.linear: repeatIcon = Icons.repeat; break;
+      case PlaybackMode.repeatAll: repeatIcon = Icons.repeat_on; break;
+      case PlaybackMode.repeatTrack: repeatIcon = Icons.repeat_one_on; break;
+    }
+
+    return Column(
       children: [
-        IconButton(
-          icon: const Icon(Icons.skip_previous),
-          iconSize: 36,
-          color: AppColors.offWhite,
-          onPressed: () {},
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            IconButton(
+              icon: Icon(Icons.shuffle, color: queueState.isShuffleEnabled ? AppColors.beige : AppColors.midGrey),
+              onPressed: () => queueNotifier.toggleShuffle(),
+            ),
+            IconButton(
+              icon: Icon(repeatIcon, color: queueState.mode == PlaybackMode.linear ? AppColors.midGrey : AppColors.beige),
+              onPressed: () => queueNotifier.toggleRepeatMode(),
+            ),
+          ],
         ),
-        const SizedBox(width: 20),
-        Container(
-          width: 64,
-          height: 64,
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppColors.beige,
-          ),
-          child: isLoading 
-            ? const Padding(
-                padding: EdgeInsets.all(16.0),
-                child: CircularProgressIndicator(color: AppColors.nearBlack, strokeWidth: 3),
-              )
-            : IconButton(
-                icon: AnimatedIcon(
-                  icon: AnimatedIcons.play_pause,
-                  progress: _playPauseAnimController,
-                ),
-                iconSize: 36,
-                color: AppColors.nearBlack,
-                onPressed: () {
-                  final notifier = ref.read(playbackStateProvider.notifier);
-                  if (state.status == PlaybackStatus.playing) {
-                    notifier.pause();
-                  } else {
-                    notifier.play();
-                  }
-                },
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.skip_previous),
+              iconSize: 36,
+              color: AppColors.offWhite,
+              onPressed: () => queueNotifier.playPrevious(),
+            ),
+            const SizedBox(width: 20),
+            Container(
+              width: 64,
+              height: 64,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.beige,
               ),
-        ),
-        const SizedBox(width: 20),
-        IconButton(
-          icon: const Icon(Icons.skip_next),
-          iconSize: 36,
-          color: AppColors.offWhite,
-          onPressed: () {},
+              child: isLoading 
+                ? const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: CircularProgressIndicator(color: AppColors.nearBlack, strokeWidth: 3),
+                  )
+                : IconButton(
+                    icon: AnimatedIcon(
+                      icon: AnimatedIcons.play_pause,
+                      progress: _playPauseAnimController,
+                    ),
+                    iconSize: 36,
+                    color: AppColors.nearBlack,
+                    onPressed: () {
+                      final notifier = ref.read(playbackStateProvider.notifier);
+                      if (state.status == PlaybackStatus.playing) {
+                        notifier.pause();
+                      } else {
+                        notifier.play();
+                      }
+                    },
+                  ),
+            ),
+            const SizedBox(width: 20),
+            IconButton(
+              icon: const Icon(Icons.skip_next),
+              iconSize: 36,
+              color: AppColors.offWhite,
+              onPressed: () => queueNotifier.playNext(),
+            ),
+          ],
         ),
       ],
     );
