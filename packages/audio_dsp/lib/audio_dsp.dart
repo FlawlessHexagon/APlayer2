@@ -66,6 +66,18 @@ final _SetEqBandGain _setEqBandGain = _dylib.lookup<NativeFunction<_set_eq_band_
 final _SetStereoWidth _setStereoWidth = _dylib.lookup<NativeFunction<_set_stereo_width_func>>('set_stereo_width').asFunction();
 final _SetMono _setMono = _dylib.lookup<NativeFunction<_set_mono_func>>('set_mono').asFunction();
 
+typedef _get_duration_func = Float Function();
+typedef _GetDuration = double Function();
+final _GetDuration _getDuration = _dylib.lookup<NativeFunction<_get_duration_func>>('get_duration').asFunction();
+
+typedef _get_position_func = Float Function();
+typedef _GetPosition = double Function();
+final _GetPosition _getPosition = _dylib.lookup<NativeFunction<_get_position_func>>('get_position').asFunction();
+
+typedef _seek_to_position_func = Int32 Function(Float positionSeconds);
+typedef _SeekToPosition = int Function(double positionSeconds);
+final _SeekToPosition _seekToPosition = _dylib.lookup<NativeFunction<_seek_to_position_func>>('seek_to_position').asFunction();
+
 // --- Strong Types ---
 
 enum EqBand {
@@ -132,6 +144,25 @@ class AudioEngineController {
     _ensureInitialized();
     final res = _pauseAudio();
     if (res != 0) throw AudioEngineException('Failed to pause audio', res);
+  }
+
+  /// Returns the current track duration.
+  Duration get duration {
+    if (!_isInitialized) return Duration.zero;
+    return Duration(milliseconds: (_getDuration() * 1000).toInt());
+  }
+
+  /// Returns the current playback position.
+  Duration get position {
+    if (!_isInitialized) return Duration.zero;
+    return Duration(milliseconds: (_getPosition() * 1000).toInt());
+  }
+
+  /// Seeks to a specific position in the track.
+  void seek(Duration pos) {
+    _ensureInitialized();
+    final res = _seekToPosition(pos.inMilliseconds / 1000.0);
+    if (res != 0) throw AudioEngineException('Failed to seek', res);
   }
 
   /// Crossfades from the current track to a new file over [duration].

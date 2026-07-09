@@ -29,6 +29,11 @@ static std::atomic<float> crossfade_progress(1.0f);
 static std::atomic<float> crossfade_step(0.0f);
 static std::atomic<bool> active_is_A(true);
 
+// Position State
+static std::atomic<int64_t> seek_target_frame(-1);
+static std::atomic<float> current_position(0.0f);
+static std::atomic<float> current_duration(0.0f);
+
 // Normalization State
 static std::atomic<bool> norm_enabled(false);
 static std::atomic<float> target_db(-14.0f);
@@ -100,6 +105,16 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
     float* pOutputF32 = (float*)pOutput;
     ma_uint32 channels = pDevice->playback.channels;
     
+    // Handle Thread-Safe Seek
+    int64_t seek_target = seek_target_frame.exchange(-1);
+    if (seek_target >= 0) {
+        ma_decoder* pActive = active_is_A.load() ? &decoderA : &decoderB;
+        bool loaded = active_is_A.load() ? isA_loaded.load() : isB_loaded.load();
+        if (loaded) {
+            ma_decoder_seek_to_pcm_frame(pActive, seek_target);
+        }
+    }
+
     // 1. Read sources
     float bufferA[16384]; // Max supported frames: 8192
     ma_uint64 framesReadA = 0;
@@ -111,6 +126,15 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
     ma_uint64 framesReadB = 0;
     if (isB_loaded && isB_playing) {
         ma_decoder_read_pcm_frames(&decoderB, bufferB, frameCount, &framesReadB);
+    }
+    
+    // Broadcast current position
+    ma_decoder* pCurrent = active_is_A.load() ? &decoderA : &decoderB;
+    bool curLoaded = active_is_A.load() ? isA_loaded.load() : isB_loaded.load();
+    if (curLoaded) {
+        ma_uint64 cursor = 0;
+        ma_decoder_get_cursor_in_pcm_frames(pCurrent, &cursor);
+        current_position.store((float)cursor / 44100.0f);
     }
     
     // 2. Mix and Crossfade (Pass 1)
@@ -264,6 +288,11 @@ int load_audio_file(const char* path) {
     if (isA_loaded.load()) ma_decoder_uninit(&decoderA);
     ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 2, 44100);
     if (ma_decoder_init_file(path, &config, &decoderA) != MA_SUCCESS) return -1;
+    
+    ma_uint64 length = 0;
+    ma_decoder_get_length_in_pcm_frames(&decoderA, &length);
+    current_duration.store((float)length / 44100.0f);
+    
     isA_loaded.store(true);
     active_is_A.store(true);
     is_crossfading.store(false);
@@ -314,6 +343,10 @@ int crossfade_to_file(const char* path, int duration_ms) {
     ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 2, 44100);
     if (ma_decoder_init_file(path, &config, pNext) != MA_SUCCESS) return -1;
     
+    ma_uint64 length = 0;
+    ma_decoder_get_length_in_pcm_frames(pNext, &length);
+    current_duration.store((float)length / 44100.0f);
+    
     if (load_into_B) { isB_loaded.store(true); isB_playing.store(true); }
     else { isA_loaded.store(true); isA_playing.store(true); }
     
@@ -340,4 +373,22 @@ void set_stereo_width(float width) {
 extern "C" __attribute__((visibility("default"))) __attribute__((used))
 void set_mono(bool enable) {
     mono_enabled.store(enable);
+}
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+float get_duration() {
+    return current_duration.load();
+}
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+float get_position() {
+    return current_position.load();
+}
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+int seek_to_position(float position_seconds) {
+    if (!is_engine_initialized) return -1;
+    ma_uint64 target_frame = (ma_uint64)(position_seconds * 44100.0f);
+    seek_target_frame.store((int64_t)target_frame);
+    return 0;
 }
