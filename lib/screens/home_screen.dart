@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import 'library_screen.dart';
 import 'playlists_screen.dart';
 import 'scanner_test_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,6 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
     LibraryScreen(),
     PlaylistsScreen(),
     ScannerTestScreen(),
+    SettingsScreen(),
   ];
 
   @override
@@ -26,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: _pages[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
         backgroundColor: AppColors.deepPurple,
         selectedItemColor: AppColors.beige,
         unselectedItemColor: AppColors.midGrey,
@@ -39,6 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.library_music), label: 'Library'),
           BottomNavigationBarItem(icon: Icon(Icons.queue_music), label: 'Playlists'),
           BottomNavigationBarItem(icon: Icon(Icons.folder), label: 'Scanner'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
       floatingActionButton: _currentIndex == 0 ? FloatingActionButton(

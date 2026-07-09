@@ -47,6 +47,10 @@ dependencies:
   audiotags: ^1.4.5
   file_picker: ^8.1.4
   crypto: ^3.0.7
+  google_sign_in: ^6.2.1
+  googleapis: ^13.1.0
+  googleapis_auth: ^1.4.1
+  http: ^1.2.0
 
 dev_dependencies:
   flutter_test:
