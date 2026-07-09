@@ -3,11 +3,35 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:io';
+import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'theme/app_theme.dart';
 import 'providers/audio_provider.dart';
+import 'providers/audio_handler.dart';
 
-void main() {
-  runApp(const ProviderScope(child: APlayerApp()));
+late APlayerAudioHandler audioHandler;
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  final session = await AudioSession.instance;
+  await session.configure(const AudioSessionConfiguration.music());
+
+  final container = ProviderContainer();
+  
+  audioHandler = await AudioService.init(
+    builder: () => APlayerAudioHandler(container),
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: 'com.aplayer2.audio',
+      androidNotificationChannelName: 'APlayer2 Playback',
+      androidNotificationOngoing: true,
+    ),
+  );
+
+  runApp(UncontrolledProviderScope(
+    container: container,
+    child: const APlayerApp(),
+  ));
 }
 
 final _router = GoRouter(

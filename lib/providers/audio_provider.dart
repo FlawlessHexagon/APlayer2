@@ -15,20 +15,20 @@ final audioEngineProvider = Provider<AudioEngineController>((ref) {
 enum PlaybackStatus { stopped, loading, playing, paused }
 
 // Playback State Data Class
-class PlaybackState {
+class AppPlaybackState {
   final PlaybackStatus status;
   final Duration duration;
 
-  PlaybackState({
+  AppPlaybackState({
     this.status = PlaybackStatus.stopped,
     this.duration = Duration.zero,
   });
 
-  PlaybackState copyWith({
+  AppPlaybackState copyWith({
     PlaybackStatus? status,
     Duration? duration,
   }) {
-    return PlaybackState(
+    return AppPlaybackState(
       status: status ?? this.status,
       duration: duration ?? this.duration,
     );
@@ -36,11 +36,11 @@ class PlaybackState {
 }
 
 // 2. Playback State Provider
-class PlaybackStateNotifier extends Notifier<PlaybackState> {
+class PlaybackStateNotifier extends Notifier<AppPlaybackState> {
   @override
-  PlaybackState build() {
+  AppPlaybackState build() {
     _initEngine();
-    return PlaybackState();
+    return AppPlaybackState();
   }
   
   AudioEngineController get _engine => ref.read(audioEngineProvider);
@@ -81,7 +81,7 @@ class PlaybackStateNotifier extends Notifier<PlaybackState> {
   }
 }
 
-final playbackStateProvider = NotifierProvider<PlaybackStateNotifier, PlaybackState>(() {
+final playbackStateProvider = NotifierProvider<PlaybackStateNotifier, AppPlaybackState>(() {
   return PlaybackStateNotifier();
 });
 
