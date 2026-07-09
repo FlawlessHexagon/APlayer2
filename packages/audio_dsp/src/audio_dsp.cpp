@@ -100,8 +100,6 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
     float* pOutputF32 = (float*)pOutput;
     ma_uint32 channels = pDevice->playback.channels;
     
-    memset(pOutputF32, 0, frameCount * channels * sizeof(float));
-    
     // 1. Read sources
     float bufferA[16384]; // Max supported frames: 8192
     ma_uint64 framesReadA = 0;
@@ -115,14 +113,16 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
         ma_decoder_read_pcm_frames(&decoderB, bufferB, frameCount, &framesReadB);
     }
     
-    // 2. Mix and Crossfade
+    // 2. Mix and Crossfade (Pass 1)
     float fade_prog = crossfade_progress.load();
     float fade_step = crossfade_step.load();
     bool crossfading = is_crossfading.load();
     bool a_is_main = active_is_A.load();
     
-    for (ma_uint32 i = 0; i < frameCount * channels; ++i) {
-        if (i % channels == 0 && crossfading) {
+    float sumSquares = 0.0f;
+    
+    for (ma_uint32 f = 0; f < frameCount; ++f) {
+        if (crossfading) {
             fade_prog += fade_step;
             if (fade_prog >= 1.0f) {
                 fade_prog = 1.0f;
@@ -134,45 +134,33 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
             crossfade_progress.store(fade_prog);
         }
         
-        float sampleA = (i < framesReadA * channels) ? bufferA[i] : 0.0f;
-        float sampleB = (i < framesReadB * channels) ? bufferB[i] : 0.0f;
-        
         float gainA = crossfading ? (a_is_main ? fade_prog : 1.0f - fade_prog) : (a_is_main ? 1.0f : 0.0f);
         float gainB = crossfading ? (a_is_main ? 1.0f - fade_prog : fade_prog) : (a_is_main ? 0.0f : 1.0f);
         
-        pOutputF32[i] = (sampleA * gainA) + (sampleB * gainB);
+        float L = ((f < framesReadA) ? bufferA[f * channels + 0] : 0.0f) * gainA + 
+                  ((f < framesReadB) ? bufferB[f * channels + 0] : 0.0f) * gainB;
+                  
+        float R = ((f < framesReadA) ? bufferA[f * channels + 1] : 0.0f) * gainA + 
+                  ((f < framesReadB) ? bufferB[f * channels + 1] : 0.0f) * gainB;
+                  
+        pOutputF32[f * channels + 0] = L;
+        pOutputF32[f * channels + 1] = R;
+        
+        sumSquares += L * L + R * R;
     }
     
-    // 3. RMS Normalization
-    if (norm_enabled.load()) {
-        float sumSquares = 0.0f;
-        for (ma_uint32 i = 0; i < frameCount * channels; ++i) {
-            sumSquares += pOutputF32[i] * pOutputF32[i];
-        }
+    // 3. RMS Calculation
+    float target_gain = 1.0f;
+    bool is_norm_enabled = norm_enabled.load();
+    if (is_norm_enabled) {
         float rms = sqrtf(sumSquares / (float)(frameCount * channels));
-        
         float target_linear = db_to_linear(target_db.load());
-        float target_gain = (rms > 0.0001f) ? (target_linear / rms) : 1.0f;
-        
-        float slew_rate = 0.001f; 
-        for (ma_uint32 i = 0; i < frameCount * channels; ++i) {
-            if (i % channels == 0) {
-                if (current_gain < target_gain) {
-                    current_gain += slew_rate;
-                    if (current_gain > target_gain) current_gain = target_gain;
-                } else if (current_gain > target_gain) {
-                    current_gain -= slew_rate;
-                    if (current_gain < target_gain) current_gain = target_gain;
-                }
-            }
-            pOutputF32[i] *= current_gain;
-        }
+        target_gain = (rms > 0.0001f) ? (target_linear / rms) : 1.0f;
     } else {
         current_gain = 1.0f;
     }
 
     // 4. Update EQ Coeffs (in case they changed from Dart thread)
-    // To be thread-safe without locks, we calculate them if the atomic float changed.
     static float last_eq_gains[10] = {0};
     for (int b = 0; b < 10; ++b) {
         float g = eq_gains[b].load();
@@ -182,13 +170,27 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
         }
     }
 
-    // 5. Apply EQ, Stereo Width, and Limiter
+    // 5. Apply Gain, EQ, Stereo Width, and Limiter (Pass 2)
     bool is_mono = mono_enabled.load();
     float width = stereo_width.load();
+    float slew_rate = 0.001f; 
     
     for (ma_uint32 f = 0; f < frameCount; ++f) {
         float L = pOutputF32[f * channels + 0];
         float R = pOutputF32[f * channels + 1];
+        
+        // Slew-rate Normalization Gain
+        if (is_norm_enabled) {
+            if (current_gain < target_gain) {
+                current_gain += slew_rate;
+                if (current_gain > target_gain) current_gain = target_gain;
+            } else if (current_gain > target_gain) {
+                current_gain -= slew_rate;
+                if (current_gain < target_gain) current_gain = target_gain;
+            }
+            L *= current_gain;
+            R *= current_gain;
+        }
         
         // 10-Band EQ
         for (int b = 0; b < 10; ++b) {
@@ -224,7 +226,7 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
         L *= limiter_gain;
         R *= limiter_gain;
         
-        // Final Hard Clamp for safety
+        // Final Hard Clamp
         if (L > 1.0f) L = 1.0f; else if (L < -1.0f) L = -1.0f;
         if (R > 1.0f) R = 1.0f; else if (R < -1.0f) R = -1.0f;
         

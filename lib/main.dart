@@ -78,9 +78,9 @@ class _TestScreenState extends State<TestScreen> {
     await file.writeAsBytes(byteData.buffer.asUint8List());
   }
 
-  Future<void> _play() async {
+  void _play() {
     try {
-      await _controller.play();
+      _controller.play();
       setState(() {
         _isPlaying = true;
         _status = 'Playing';
@@ -92,9 +92,9 @@ class _TestScreenState extends State<TestScreen> {
     }
   }
 
-  Future<void> _pause() async {
+  void _pause() {
     try {
-      await _controller.pause();
+      _controller.pause();
       setState(() {
         _isPlaying = false;
         _status = 'Paused';
@@ -116,7 +116,7 @@ class _TestScreenState extends State<TestScreen> {
         _status = 'Crossfading to $nextFile...';
       });
       
-      await _controller.crossfadeToFile(file.path, 2000);
+      await _controller.crossfadeToFile(file.path, const Duration(milliseconds: 2000));
       
       setState(() {
         _isPlaying = true;
@@ -130,7 +130,7 @@ class _TestScreenState extends State<TestScreen> {
 
   @override
   void dispose() {
-    _controller.shutdown();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -187,7 +187,7 @@ class _TestScreenState extends State<TestScreen> {
                                 setState(() {
                                   _eqGains[index] = val;
                                 });
-                                _controller.setEqBandGain(index, val);
+                                _controller.setEqBandGain(audio_dsp.EqBand.values[index], val);
                               },
                             ),
                           ),
