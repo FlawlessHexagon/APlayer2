@@ -34,6 +34,12 @@ class _TestScreenState extends State<TestScreen> {
   bool _normEnabled = false;
   double _targetDb = -14.0;
   bool _isSample1 = true;
+  
+  final List<double> _eqGains = List.filled(10, 0.0);
+  final List<String> _eqLabels = ['32', '64', '125', '250', '500', '1K', '2K', '4K', '8K', '16K'];
+  
+  double _stereoWidth = 1.0;
+  bool _monoEnabled = false;
 
   @override
   void initState() {
@@ -45,7 +51,6 @@ class _TestScreenState extends State<TestScreen> {
     try {
       await _controller.init();
       
-      // Copy assets to temp file
       await _copyAsset('sample.wav');
       await _copyAsset('sample2.wav');
       
@@ -133,61 +138,105 @@ class _TestScreenState extends State<TestScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('APlayer2 DSP Test')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(_status, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(
-                  onPressed: (_isReady && !_isPlaying) ? _play : null,
-                  child: const Text('Play'),
-                ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: (_isReady && _isPlaying) ? _pause : null,
-                  child: const Text('Pause'),
-                ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: _isReady ? _nextTrack : null,
-                  child: const Text('Next Track (Crossfade)'),
-                ),
-              ],
-            ),
-            const Divider(height: 40),
-            SwitchListTile(
-              title: const Text('Enable RMS Normalization'),
-              value: _normEnabled,
-              onChanged: (val) {
-                setState(() => _normEnabled = val);
-                _controller.enableNormalization(val);
-              },
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Row(
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(_status, style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('Target dB:'),
+                  ElevatedButton(
+                    onPressed: (_isReady && !_isPlaying) ? _play : null,
+                    child: const Text('Play'),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: (_isReady && _isPlaying) ? _pause : null,
+                    child: const Text('Pause'),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: _isReady ? _nextTrack : null,
+                    child: const Text('Next Track'),
+                  ),
+                ],
+              ),
+              const Divider(height: 30),
+              const Text('10-Band EQ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(10, (index) {
+                    return Column(
+                      children: [
+                        Text('${_eqGains[index].toStringAsFixed(1)}'),
+                        SizedBox(
+                          height: 150,
+                          child: RotatedBox(
+                            quarterTurns: 3,
+                            child: Slider(
+                              value: _eqGains[index],
+                              min: -12.0,
+                              max: 12.0,
+                              onChanged: (val) {
+                                setState(() {
+                                  _eqGains[index] = val;
+                                });
+                                _controller.setEqBandGain(index, val);
+                              },
+                            ),
+                          ),
+                        ),
+                        Text(_eqLabels[index]),
+                      ],
+                    );
+                  }),
+                ),
+              ),
+              const Divider(height: 30),
+              const Text('Spatial FX', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Row(
+                children: [
+                  const Text('Width:'),
                   Expanded(
                     child: Slider(
-                      value: _targetDb,
-                      min: -30.0,
-                      max: 0.0,
+                      value: _stereoWidth,
+                      min: 0.0,
+                      max: 2.0,
                       onChanged: (val) {
-                        setState(() => _targetDb = val);
-                        _controller.setNormalizationTarget(val);
+                        setState(() => _stereoWidth = val);
+                        _controller.setStereoWidth(val);
                       },
                     ),
                   ),
-                  Text('${_targetDb.toStringAsFixed(1)} dB'),
+                  Text(_stereoWidth.toStringAsFixed(2)),
                 ],
               ),
-            ),
-          ],
+              SwitchListTile(
+                title: const Text('Force Mono'),
+                value: _monoEnabled,
+                onChanged: (val) {
+                  setState(() => _monoEnabled = val);
+                  _controller.setMono(val);
+                },
+              ),
+              const Divider(height: 30),
+              const Text('Normalization', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              SwitchListTile(
+                title: const Text('Enable RMS Normalization'),
+                value: _normEnabled,
+                onChanged: (val) {
+                  setState(() => _normEnabled = val);
+                  _controller.enableNormalization(val);
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );

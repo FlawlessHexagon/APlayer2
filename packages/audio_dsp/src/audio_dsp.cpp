@@ -6,6 +6,10 @@
 #include <algorithm>
 #include <atomic>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 // DSP State
 static ma_device device;
 static bool is_engine_initialized = false;
@@ -21,22 +25,74 @@ static std::atomic<bool> isB_playing(false);
 
 // Crossfade State
 static std::atomic<bool> is_crossfading(false);
-static std::atomic<float> crossfade_progress(1.0f); // 0.0 to 1.0. 1.0 means B is fully active, or A is fully active.
+static std::atomic<float> crossfade_progress(1.0f);
 static std::atomic<float> crossfade_step(0.0f);
-static std::atomic<bool> active_is_A(true); // true = A is main, false = B is main
+static std::atomic<bool> active_is_A(true);
 
 // Normalization State
 static std::atomic<bool> norm_enabled(false);
 static std::atomic<float> target_db(-14.0f);
-static float current_gain = 1.0f; // Slew-limited gain
+static float current_gain = 1.0f;
+
+// Stereo Width / Mono State
+static std::atomic<float> stereo_width(1.0f);
+static std::atomic<bool> mono_enabled(false);
+
+// EQ State
+struct BiquadCoeffs {
+    float b0, b1, b2, a1, a2;
+};
+
+struct BiquadState {
+    float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+};
+
+static const float EQ_FREQS[10] = {32.0f, 64.0f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f};
+static std::atomic<float> eq_gains[10];
+static BiquadCoeffs eq_coeffs[10];
+static BiquadState eq_states[10][2]; // 10 bands, 2 channels
+
+static void calculate_peaking_eq(int index, float gainDb, float sampleRate) {
+    float A = powf(10.0f, gainDb / 40.0f);
+    float w0 = 2.0f * (float)M_PI * EQ_FREQS[index] / sampleRate;
+    float alpha = sinf(w0) / (2.0f * 1.414f); // Q = 1.414
+
+    float b0 = 1.0f + alpha * A;
+    float b1 = -2.0f * cosf(w0);
+    float b2 = 1.0f - alpha * A;
+    float a0 = 1.0f + alpha / A;
+    float a1 = -2.0f * cosf(w0);
+    float a2 = 1.0f - alpha / A;
+
+    eq_coeffs[index].b0 = b0 / a0;
+    eq_coeffs[index].b1 = b1 / a0;
+    eq_coeffs[index].b2 = b2 / a0;
+    eq_coeffs[index].a1 = a1 / a0;
+    eq_coeffs[index].a2 = a2 / a0;
+}
+
+static inline float process_biquad(float in, int band, int channel) {
+    BiquadCoeffs& c = eq_coeffs[band];
+    BiquadState& s = eq_states[band][channel];
+    
+    float out = c.b0 * in + c.b1 * s.x1 + c.b2 * s.x2 - c.a1 * s.y1 - c.a2 * s.y2;
+    
+    // Denormal prevention
+    if (fabs(out) < 1e-15f) out = 0.0f;
+    
+    s.x2 = s.x1;
+    s.x1 = in;
+    s.y2 = s.y1;
+    s.y1 = out;
+    
+    return out;
+}
+
+// Limiter state
+static float limiter_gain = 1.0f;
 
 static inline float db_to_linear(float db) {
     return powf(10.0f, db / 20.0f);
-}
-
-static inline float linear_to_db(float linear) {
-    if (linear <= 0.00001f) return -100.0f;
-    return 20.0f * log10f(linear);
 }
 
 // Custom Data Callback for DSP Pipeline
@@ -44,42 +100,36 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
     float* pOutputF32 = (float*)pOutput;
     ma_uint32 channels = pDevice->playback.channels;
     
-    // Clear output buffer first
     memset(pOutputF32, 0, frameCount * channels * sizeof(float));
     
-    // Read from A
-    float bufferA[16384]; // Max expected frame count usually < 4096
+    // 1. Read sources
+    float bufferA[16384]; // Max supported frames: 8192
     ma_uint64 framesReadA = 0;
     if (isA_loaded && isA_playing) {
         ma_decoder_read_pcm_frames(&decoderA, bufferA, frameCount, &framesReadA);
     }
     
-    // Read from B
     float bufferB[16384];
     ma_uint64 framesReadB = 0;
     if (isB_loaded && isB_playing) {
         ma_decoder_read_pcm_frames(&decoderB, bufferB, frameCount, &framesReadB);
     }
     
-    // Mix and Crossfade
+    // 2. Mix and Crossfade
     float fade_prog = crossfade_progress.load();
     float fade_step = crossfade_step.load();
     bool crossfading = is_crossfading.load();
     bool a_is_main = active_is_A.load();
     
     for (ma_uint32 i = 0; i < frameCount * channels; ++i) {
-        // Handle crossfade per frame (though typically done per sample, doing it per sample channel is fine as long as we step every frame)
         if (i % channels == 0 && crossfading) {
             fade_prog += fade_step;
             if (fade_prog >= 1.0f) {
                 fade_prog = 1.0f;
                 crossfading = false;
                 is_crossfading.store(false);
-                if (a_is_main) {
-                    isB_playing.store(false); // B faded out entirely
-                } else {
-                    isA_playing.store(false); // A faded out entirely
-                }
+                if (a_is_main) isB_playing.store(false);
+                else isA_playing.store(false);
             }
             crossfade_progress.store(fade_prog);
         }
@@ -87,34 +137,13 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
         float sampleA = (i < framesReadA * channels) ? bufferA[i] : 0.0f;
         float sampleB = (i < framesReadB * channels) ? bufferB[i] : 0.0f;
         
-        float gainA = 0.0f;
-        float gainB = 0.0f;
+        float gainA = crossfading ? (a_is_main ? fade_prog : 1.0f - fade_prog) : (a_is_main ? 1.0f : 0.0f);
+        float gainB = crossfading ? (a_is_main ? 1.0f - fade_prog : fade_prog) : (a_is_main ? 0.0f : 1.0f);
         
-        if (crossfading) {
-            if (a_is_main) {
-                // Fading from B to A
-                gainA = fade_prog;
-                gainB = 1.0f - fade_prog;
-            } else {
-                // Fading from A to B
-                gainA = 1.0f - fade_prog;
-                gainB = fade_prog;
-            }
-        } else {
-            if (a_is_main) {
-                gainA = 1.0f;
-                gainB = 0.0f;
-            } else {
-                gainA = 0.0f;
-                gainB = 1.0f;
-            }
-        }
-        
-        float mixed = (sampleA * gainA) + (sampleB * gainB);
-        pOutputF32[i] = mixed;
+        pOutputF32[i] = (sampleA * gainA) + (sampleB * gainB);
     }
     
-    // RMS Normalization Stage
+    // 3. RMS Normalization
     if (norm_enabled.load()) {
         float sumSquares = 0.0f;
         for (ma_uint32 i = 0; i < frameCount * channels; ++i) {
@@ -123,14 +152,9 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
         float rms = sqrtf(sumSquares / (float)(frameCount * channels));
         
         float target_linear = db_to_linear(target_db.load());
-        float target_gain = 1.0f;
-        if (rms > 0.0001f) {
-            target_gain = target_linear / rms;
-        }
+        float target_gain = (rms > 0.0001f) ? (target_linear / rms) : 1.0f;
         
-        // Slew rate limiting (smooth gain changes to avoid clicks)
         float slew_rate = 0.001f; 
-        
         for (ma_uint32 i = 0; i < frameCount * channels; ++i) {
             if (i % channels == 0) {
                 if (current_gain < target_gain) {
@@ -144,14 +168,68 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
             pOutputF32[i] *= current_gain;
         }
     } else {
-        // Reset gain safely when disabled
         current_gain = 1.0f;
     }
+
+    // 4. Update EQ Coeffs (in case they changed from Dart thread)
+    // To be thread-safe without locks, we calculate them if the atomic float changed.
+    static float last_eq_gains[10] = {0};
+    for (int b = 0; b < 10; ++b) {
+        float g = eq_gains[b].load();
+        if (g != last_eq_gains[b]) {
+            calculate_peaking_eq(b, g, (float)pDevice->sampleRate);
+            last_eq_gains[b] = g;
+        }
+    }
+
+    // 5. Apply EQ, Stereo Width, and Limiter
+    bool is_mono = mono_enabled.load();
+    float width = stereo_width.load();
     
-    // Hard Limiter / Clipping handler (Input Mixer clipping)
-    for (ma_uint32 i = 0; i < frameCount * channels; ++i) {
-        if (pOutputF32[i] > 1.0f) pOutputF32[i] = 1.0f;
-        else if (pOutputF32[i] < -1.0f) pOutputF32[i] = -1.0f;
+    for (ma_uint32 f = 0; f < frameCount; ++f) {
+        float L = pOutputF32[f * channels + 0];
+        float R = pOutputF32[f * channels + 1];
+        
+        // 10-Band EQ
+        for (int b = 0; b < 10; ++b) {
+            L = process_biquad(L, b, 0);
+            R = process_biquad(R, b, 1);
+        }
+        
+        // Stereo Width / Mono Matrix
+        if (is_mono) {
+            float avg = (L + R) * 0.5f;
+            L = avg;
+            R = avg;
+        } else if (width != 1.0f) {
+            float mid = (L + R) * 0.5f;
+            float side = (L - R) * 0.5f;
+            side *= width;
+            L = mid + side;
+            R = mid - side;
+        }
+        
+        // Limiter (Fast attack, moderate release)
+        float peakL = fabs(L);
+        float peakR = fabs(R);
+        float maxPeak = (peakL > peakR) ? peakL : peakR;
+        
+        if (maxPeak * limiter_gain > 1.0f) {
+            limiter_gain = 1.0f / maxPeak; // Instant attack
+        } else {
+            limiter_gain += 0.00005f; // Release
+            if (limiter_gain > 1.0f) limiter_gain = 1.0f;
+        }
+        
+        L *= limiter_gain;
+        R *= limiter_gain;
+        
+        // Final Hard Clamp for safety
+        if (L > 1.0f) L = 1.0f; else if (L < -1.0f) L = -1.0f;
+        if (R > 1.0f) R = 1.0f; else if (R < -1.0f) R = -1.0f;
+        
+        pOutputF32[f * channels + 0] = L;
+        pOutputF32[f * channels + 1] = R;
     }
 }
 
@@ -159,18 +237,21 @@ extern "C" __attribute__((visibility("default"))) __attribute__((used))
 int init_audio_engine() {
     if (is_engine_initialized) return 0;
     
+    // Initialize EQ defaults
+    for(int i=0; i<10; i++) {
+        eq_gains[i].store(0.0f);
+        calculate_peaking_eq(i, 0.0f, 44100.0f);
+    }
+    
     ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
     deviceConfig.playback.format   = ma_format_f32;
     deviceConfig.playback.channels = 2;
     deviceConfig.sampleRate        = 44100;
     deviceConfig.dataCallback      = data_callback;
-    deviceConfig.pUserData         = NULL;
 
-    if (ma_device_init(NULL, &deviceConfig, &device) != MA_SUCCESS) {
-        return -1;
-    }
-    
+    if (ma_device_init(NULL, &deviceConfig, &device) != MA_SUCCESS) return -1;
     ma_device_start(&device);
+    
     is_engine_initialized = true;
     return 0;
 }
@@ -178,16 +259,9 @@ int init_audio_engine() {
 extern "C" __attribute__((visibility("default"))) __attribute__((used))
 int load_audio_file(const char* path) {
     if (!is_engine_initialized) return -1;
-    
-    if (isA_loaded.load()) {
-        ma_decoder_uninit(&decoderA);
-    }
-    
-    ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 44100);
-    if (ma_decoder_init_file(path, &decoderConfig, &decoderA) != MA_SUCCESS) {
-        return -1;
-    }
-    
+    if (isA_loaded.load()) ma_decoder_uninit(&decoderA);
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 2, 44100);
+    if (ma_decoder_init_file(path, &config, &decoderA) != MA_SUCCESS) return -1;
     isA_loaded.store(true);
     active_is_A.store(true);
     is_crossfading.store(false);
@@ -197,11 +271,8 @@ int load_audio_file(const char* path) {
 extern "C" __attribute__((visibility("default"))) __attribute__((used))
 int play_audio() {
     if (!is_engine_initialized) return -1;
-    if (active_is_A.load()) {
-        isA_playing.store(true);
-    } else {
-        isB_playing.store(true);
-    }
+    if (active_is_A.load()) isA_playing.store(true);
+    else isB_playing.store(true);
     return 0;
 }
 
@@ -219,67 +290,52 @@ int shutdown_audio_engine() {
         ma_device_uninit(&device);
         is_engine_initialized = false;
     }
-    if (isA_loaded.load()) {
-        ma_decoder_uninit(&decoderA);
-        isA_loaded.store(false);
-    }
-    if (isB_loaded.load()) {
-        ma_decoder_uninit(&decoderB);
-        isB_loaded.store(false);
-    }
+    if (isA_loaded.load()) { ma_decoder_uninit(&decoderA); isA_loaded.store(false); }
+    if (isB_loaded.load()) { ma_decoder_uninit(&decoderB); isB_loaded.store(false); }
     return 0;
 }
 
 extern "C" __attribute__((visibility("default"))) __attribute__((used))
-void set_normalization_target(float target) {
-    target_db.store(target);
-}
+void set_normalization_target(float target) { target_db.store(target); }
 
 extern "C" __attribute__((visibility("default"))) __attribute__((used))
-void enable_normalization(bool enable) {
-    norm_enabled.store(enable);
-}
+void enable_normalization(bool enable) { norm_enabled.store(enable); }
 
 extern "C" __attribute__((visibility("default"))) __attribute__((used))
 int crossfade_to_file(const char* path, int duration_ms) {
     if (!is_engine_initialized) return -1;
-    
     bool load_into_B = active_is_A.load();
-    ma_decoder* pNextDecoder = load_into_B ? &decoderB : &decoderA;
+    ma_decoder* pNext = load_into_B ? &decoderB : &decoderA;
+    if (load_into_B && isB_loaded.load()) { ma_decoder_uninit(&decoderB); isB_loaded.store(false); }
+    else if (!load_into_B && isA_loaded.load()) { ma_decoder_uninit(&decoderA); isA_loaded.store(false); }
     
-    if (load_into_B && isB_loaded.load()) {
-        ma_decoder_uninit(&decoderB);
-        isB_loaded.store(false);
-    } else if (!load_into_B && isA_loaded.load()) {
-        ma_decoder_uninit(&decoderA);
-        isA_loaded.store(false);
-    }
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 2, 44100);
+    if (ma_decoder_init_file(path, &config, pNext) != MA_SUCCESS) return -1;
     
-    ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 44100);
-    if (ma_decoder_init_file(path, &decoderConfig, pNextDecoder) != MA_SUCCESS) {
-        return -1;
-    }
+    if (load_into_B) { isB_loaded.store(true); isB_playing.store(true); }
+    else { isA_loaded.store(true); isA_playing.store(true); }
     
-    if (load_into_B) {
-        isB_loaded.store(true);
-        isB_playing.store(true);
-    } else {
-        isA_loaded.store(true);
-        isA_playing.store(true);
-    }
-    
-    float frames_total = (duration_ms / 1000.0f) * 44100.0f;
-    float step = frames_total > 0.0f ? (1.0f / frames_total) : 1.0f;
-    
-    crossfade_step.store(step);
+    float frames = (duration_ms / 1000.0f) * 44100.0f;
+    crossfade_step.store(frames > 0.0f ? (1.0f / frames) : 1.0f);
     crossfade_progress.store(0.0f);
-    active_is_A.store(!load_into_B); // Switch the active track
+    active_is_A.store(!load_into_B);
     is_crossfading.store(true);
-    
     return 0;
 }
 
-extern "C" __attribute__((visibility("default"))) __attribute__((used)) 
-int test_ffi_connection() {
-    return 42;
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void set_eq_band_gain(int band_index, float gain_db) {
+    if (band_index >= 0 && band_index < 10) {
+        eq_gains[band_index].store(gain_db);
+    }
+}
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void set_stereo_width(float width) {
+    stereo_width.store(width);
+}
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void set_mono(bool enable) {
+    mono_enabled.store(enable);
 }

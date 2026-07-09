@@ -103,4 +103,30 @@ class AudioEngineController {
       malloc.free(pointer);
     }
   }
+
+  void setEqBandGain(int bandIndex, double gainDb) {
+    _setEqBandGain(bandIndex, gainDb);
+  }
+
+  void setStereoWidth(double width) {
+    _setStereoWidth(width);
+  }
+
+  void setMono(bool enable) {
+    _setMono(enable);
+  }
 }
+
+typedef _set_eq_band_gain_func = Void Function(Int32 bandIndex, Float gainDb);
+typedef _SetEqBandGain = void Function(int bandIndex, double gainDb);
+
+typedef _set_stereo_width_func = Void Function(Float width);
+typedef _SetStereoWidth = void Function(double width);
+
+typedef _set_mono_func = Void Function(Bool enable);
+typedef _SetMono = void Function(bool enable);
+
+final _SetEqBandGain _setEqBandGain = _dylib.lookup<NativeFunction<_set_eq_band_gain_func>>('set_eq_band_gain').asFunction();
+final _SetStereoWidth _setStereoWidth = _dylib.lookup<NativeFunction<_set_stereo_width_func>>('set_stereo_width').asFunction();
+final _SetMono _setMono = _dylib.lookup<NativeFunction<_set_mono_func>>('set_mono').asFunction();
+
