@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'dart:io';
+import 'dart:async';
+import 'dart:math' as math;
 import 'package:audio_dsp/audio_dsp.dart' as audio_dsp;
 
 void main() {
@@ -40,6 +42,9 @@ class _TestScreenState extends State<TestScreen> {
   
   double _stereoWidth = 1.0;
   bool _monoEnabled = false;
+
+  bool _isStressTesting = false;
+  Timer? _stressTimer;
 
   @override
   void initState() {
@@ -128,8 +133,53 @@ class _TestScreenState extends State<TestScreen> {
     }
   }
 
+  void _toggleStressTest() {
+    if (_isStressTesting) {
+      _stressTimer?.cancel();
+      setState(() {
+        _isStressTesting = false;
+        _status = 'Stress test stopped';
+      });
+    } else {
+      setState(() {
+        _isStressTesting = true;
+        _status = 'Stress testing active!';
+      });
+      if (!_isPlaying) _play();
+      
+      int count = 0;
+      final random = math.Random();
+      _stressTimer = Timer.periodic(const Duration(milliseconds: 150), (timer) {
+        count++;
+        // Rapid track change every 1.5 seconds (stresses decoder load/unload & memory bounds)
+        if (count % 10 == 0) {
+          _nextTrack();
+        }
+        
+        // Randomize all 10 EQ bands (stresses biquad recalculation & limiter)
+        for (int i = 0; i < 10; i++) {
+          double val = (random.nextDouble() * 24.0) - 12.0; // -12 to 12
+          setState(() => _eqGains[i] = val);
+          _controller.setEqBandGain(audio_dsp.EqBand.values[i], val);
+        }
+        
+        // Rapid width & mono toggling
+        double w = random.nextDouble() * 2.0;
+        setState(() => _stereoWidth = w);
+        _controller.setStereoWidth(w);
+        
+        if (count % 5 == 0) {
+          bool m = random.nextBool();
+          setState(() => _monoEnabled = m);
+          _controller.setMono(m);
+        }
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _stressTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -144,24 +194,31 @@ class _TestScreenState extends State<TestScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(_status, style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(_status, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent)),
               const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 10,
                 children: [
                   ElevatedButton(
-                    onPressed: (_isReady && !_isPlaying) ? _play : null,
+                    onPressed: (_isReady && !_isPlaying && !_isStressTesting) ? _play : null,
                     child: const Text('Play'),
                   ),
-                  const SizedBox(width: 10),
                   ElevatedButton(
-                    onPressed: (_isReady && _isPlaying) ? _pause : null,
+                    onPressed: (_isReady && _isPlaying && !_isStressTesting) ? _pause : null,
                     child: const Text('Pause'),
                   ),
-                  const SizedBox(width: 10),
                   ElevatedButton(
-                    onPressed: _isReady ? _nextTrack : null,
-                    child: const Text('Next Track'),
+                    onPressed: (_isReady && !_isStressTesting) ? _nextTrack : null,
+                    child: const Text('Load / Next Track'),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isStressTesting ? Colors.red : Colors.orange,
+                    ),
+                    onPressed: _isReady ? _toggleStressTest : null,
+                    child: Text(_isStressTesting ? 'STOP STRESS TEST' : 'START STRESS TEST'),
                   ),
                 ],
               ),
@@ -174,7 +231,7 @@ class _TestScreenState extends State<TestScreen> {
                   children: List.generate(10, (index) {
                     return Column(
                       children: [
-                        Text('${_eqGains[index].toStringAsFixed(1)}'),
+                        Text(_eqGains[index].toStringAsFixed(1)),
                         SizedBox(
                           height: 150,
                           child: RotatedBox(
@@ -183,7 +240,7 @@ class _TestScreenState extends State<TestScreen> {
                               value: _eqGains[index],
                               min: -12.0,
                               max: 12.0,
-                              onChanged: (val) {
+                              onChanged: _isStressTesting ? null : (val) {
                                 setState(() {
                                   _eqGains[index] = val;
                                 });
@@ -208,7 +265,7 @@ class _TestScreenState extends State<TestScreen> {
                       value: _stereoWidth,
                       min: 0.0,
                       max: 2.0,
-                      onChanged: (val) {
+                      onChanged: _isStressTesting ? null : (val) {
                         setState(() => _stereoWidth = val);
                         _controller.setStereoWidth(val);
                       },
@@ -220,7 +277,7 @@ class _TestScreenState extends State<TestScreen> {
               SwitchListTile(
                 title: const Text('Force Mono'),
                 value: _monoEnabled,
-                onChanged: (val) {
+                onChanged: _isStressTesting ? null : (val) {
                   setState(() => _monoEnabled = val);
                   _controller.setMono(val);
                 },
@@ -230,7 +287,7 @@ class _TestScreenState extends State<TestScreen> {
               SwitchListTile(
                 title: const Text('Enable RMS Normalization'),
                 value: _normEnabled,
-                onChanged: (val) {
+                onChanged: _isStressTesting ? null : (val) {
                   setState(() => _normEnabled = val);
                   _controller.enableNormalization(val);
                 },
