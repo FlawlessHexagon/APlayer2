@@ -30,6 +30,10 @@ class _TestScreenState extends State<TestScreen> {
   String _status = 'Initializing...';
   bool _isPlaying = false;
   bool _isReady = false;
+  
+  bool _normEnabled = false;
+  double _targetDb = -14.0;
+  bool _isSample1 = true;
 
   @override
   void initState() {
@@ -41,12 +45,12 @@ class _TestScreenState extends State<TestScreen> {
     try {
       await _controller.init();
       
-      // Copy asset to temp file so C++ can read it
-      final byteData = await rootBundle.load('assets/sample.wav');
-      final file = File('${Directory.systemTemp.path}/sample.wav');
-      await file.writeAsBytes(byteData.buffer.asUint8List());
+      // Copy assets to temp file
+      await _copyAsset('sample.wav');
+      await _copyAsset('sample2.wav');
       
-      await _controller.load(file.path);
+      final file1 = File('${Directory.systemTemp.path}/sample.wav');
+      await _controller.load(file1.path);
       
       if (mounted) {
         setState(() {
@@ -61,6 +65,12 @@ class _TestScreenState extends State<TestScreen> {
         });
       }
     }
+  }
+
+  Future<void> _copyAsset(String name) async {
+    final byteData = await rootBundle.load('assets/$name');
+    final file = File('${Directory.systemTemp.path}/$name');
+    await file.writeAsBytes(byteData.buffer.asUint8List());
   }
 
   Future<void> _play() async {
@@ -91,6 +101,28 @@ class _TestScreenState extends State<TestScreen> {
     }
   }
   
+  Future<void> _nextTrack() async {
+    try {
+      _isSample1 = !_isSample1;
+      String nextFile = _isSample1 ? 'sample.wav' : 'sample2.wav';
+      final file = File('${Directory.systemTemp.path}/$nextFile');
+      
+      setState(() {
+        _status = 'Crossfading to $nextFile...';
+      });
+      
+      await _controller.crossfadeToFile(file.path, 2000);
+      
+      setState(() {
+        _isPlaying = true;
+      });
+    } catch(e) {
+      setState(() {
+        _status = 'Crossfade error: $e';
+      });
+    }
+  }
+
   @override
   void dispose() {
     _controller.shutdown();
@@ -100,12 +132,12 @@ class _TestScreenState extends State<TestScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('APlayer2 Audio Test')),
+      appBar: AppBar(title: const Text('APlayer2 DSP Test')),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(_status),
+            Text(_status, style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -114,12 +146,46 @@ class _TestScreenState extends State<TestScreen> {
                   onPressed: (_isReady && !_isPlaying) ? _play : null,
                   child: const Text('Play'),
                 ),
-                const SizedBox(width: 20),
+                const SizedBox(width: 10),
                 ElevatedButton(
                   onPressed: (_isReady && _isPlaying) ? _pause : null,
                   child: const Text('Pause'),
                 ),
+                const SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: _isReady ? _nextTrack : null,
+                  child: const Text('Next Track (Crossfade)'),
+                ),
               ],
+            ),
+            const Divider(height: 40),
+            SwitchListTile(
+              title: const Text('Enable RMS Normalization'),
+              value: _normEnabled,
+              onChanged: (val) {
+                setState(() => _normEnabled = val);
+                _controller.enableNormalization(val);
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Row(
+                children: [
+                  const Text('Target dB:'),
+                  Expanded(
+                    child: Slider(
+                      value: _targetDb,
+                      min: -30.0,
+                      max: 0.0,
+                      onChanged: (val) {
+                        setState(() => _targetDb = val);
+                        _controller.setNormalizationTarget(val);
+                      },
+                    ),
+                  ),
+                  Text('${_targetDb.toStringAsFixed(1)} dB'),
+                ],
+              ),
             ),
           ],
         ),
