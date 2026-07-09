@@ -8,6 +8,7 @@ import 'package:audio_session/audio_session.dart';
 import 'theme/app_theme.dart';
 import 'providers/audio_provider.dart';
 import 'providers/audio_handler.dart';
+import 'screens/now_playing_screen.dart';
 
 late APlayerAudioHandler audioHandler;
 
@@ -90,83 +91,4 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class NowPlayingScreen extends ConsumerStatefulWidget {
-  const NowPlayingScreen({super.key});
-
-  @override
-  ConsumerState<NowPlayingScreen> createState() => _NowPlayingScreenState();
-}
-
-class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
-  Future<void> _loadTestTrack() async {
-    final byteData = await rootBundle.load('assets/sample.wav');
-    final file = File('${Directory.systemTemp.path}/sample.wav');
-    await file.writeAsBytes(byteData.buffer.asUint8List());
-    ref.read(playbackStateProvider.notifier).loadTrack(file.path);
-  }
-
-  String _formatDuration(Duration d) {
-    String twoDigits(int n) => n.toString().padLeft(2, "0");
-    String twoDigitMinutes = twoDigits(d.inMinutes.remainder(60));
-    String twoDigitSeconds = twoDigits(d.inSeconds.remainder(60));
-    return "$twoDigitMinutes:$twoDigitSeconds";
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final playbackState = ref.watch(playbackStateProvider);
-    final positionAsync = ref.watch(playbackPositionProvider);
-    
-    final currentPosition = positionAsync.value ?? Duration.zero;
-    final formattedPos = _formatDuration(currentPosition);
-    final formattedDur = _formatDuration(playbackState.duration);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Now Playing'),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Status: ${playbackState.status.name}',
-              style: const TextStyle(fontSize: 18),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              '$formattedPos / $formattedDur',
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 30),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(
-                  onPressed: _loadTestTrack,
-                  child: const Text('Load Test Audio'),
-                ),
-                const SizedBox(width: 10),
-                if (playbackState.status == PlaybackStatus.playing)
-                  ElevatedButton(
-                    onPressed: () => ref.read(playbackStateProvider.notifier).pause(),
-                    child: const Text('Pause'),
-                  )
-                else
-                  ElevatedButton(
-                    onPressed: () => ref.read(playbackStateProvider.notifier).play(),
-                    child: const Text('Play'),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 30),
-            ElevatedButton(
-              onPressed: () => context.pop(),
-              child: const Text('Back to Home'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// NowPlayingScreen has been moved to lib/screens/now_playing_screen.dart
