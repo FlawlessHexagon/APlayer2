@@ -8,8 +8,11 @@ import 'package:audio_session/audio_session.dart';
 import 'theme/app_theme.dart';
 import 'providers/audio_provider.dart';
 import 'providers/audio_handler.dart';
+import 'providers/database_provider.dart';
+import 'repositories/database_repository.dart';
 import 'screens/now_playing_screen.dart';
 import 'screens/dsp_control_screen.dart';
+import 'screens/db_test_screen.dart';
 
 late APlayerAudioHandler audioHandler;
 
@@ -19,7 +22,14 @@ Future<void> main() async {
   final session = await AudioSession.instance;
   await session.configure(const AudioSessionConfiguration.music());
 
-  final container = ProviderContainer();
+  final dbRepo = DatabaseRepository();
+  await dbRepo.init();
+
+  final container = ProviderContainer(
+    overrides: [
+      databaseRepositoryProvider.overrideWithValue(dbRepo),
+    ],
+  );
   
   audioHandler = await AudioService.init(
     builder: () => APlayerAudioHandler(container),
@@ -50,6 +60,10 @@ final _router = GoRouter(
     GoRoute(
       path: '/dsp',
       builder: (context, state) => const DspControlScreen(),
+    ),
+    GoRoute(
+      path: '/db_test',
+      builder: (context, state) => const DbTestScreen(),
     ),
   ],
 );
@@ -88,6 +102,11 @@ class HomeScreen extends StatelessWidget {
             ElevatedButton(
               onPressed: () => context.push('/now_playing'),
               child: const Text('Go to Now Playing'),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () => context.push('/db_test'),
+              child: const Text('DB Validation'),
             ),
           ],
         ),

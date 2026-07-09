@@ -41,6 +41,8 @@ dependencies:
   google_fonts: ^8.1.0
   audio_service: ^0.18.19
   audio_session: ^0.2.4
+  sqflite: ^2.4.3
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
